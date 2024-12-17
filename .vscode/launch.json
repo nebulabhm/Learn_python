@@ -4,12 +4,25 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+<<<<<<< HEAD
+=======
+
+>>>>>>> 42905d3441357211d3972e2a7b1389cbcd8083c2
         {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
+<<<<<<< HEAD
+=======
+            "console": "integratedTerminal",
+            "stopOnEntry": true,
+            "justMyCode": false,
+            "args":["9000"],
+            "autoReload": {
+                "enable": true
+            }
+>>>>>>> 42905d3441357211d3972e2a7b1389cbcd8083c2
         }
     ]
 }
