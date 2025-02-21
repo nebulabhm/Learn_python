@@ -1,11 +1,17 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QLineEdit, QPushButton, QLabel, QListWidget, QHBoxLayout,
-                            QFrame)  # Added QFrame here
-from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QFont, QScreen, QCursor
+                            QFrame, QGridLayout)  # 添加 QGridLayout
+from PyQt6.QtCore import Qt, QTimer, QPoint, QMimeData, QSize  # 添加 QSize
+from PyQt6.QtGui import QFont, QScreen, QCursor, QDragEnterEvent, QDropEvent, QIcon, QPixmap
 import sys
 import webbrowser
 import os
+import win32com.client
+import win32gui
+import win32con
+import win32ui
+from PIL import Image
+import io
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -213,7 +219,175 @@ class MainWindow(QMainWindow):
             }
         """)
         layout.addWidget(self.history_list)
-
+        # 在历史记录列表下方添加程序快捷方式区域
+        shortcut_label = QLabel("程序快捷方式：")
+        shortcut_label.setFont(QFont('Microsoft YaHei UI', 12))
+        layout.addWidget(shortcut_label)
+        
+        # 添加选择程序按钮
+        select_program_btn = QPushButton("选择程序")
+        select_program_btn.setFont(QFont('Microsoft YaHei UI', 10))
+        select_program_btn.clicked.connect(self.select_program)
+        select_program_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4285f4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #3b78e7;
+            }
+            QPushButton:pressed {
+                background-color: #3367d6;
+            }
+        """)
+        layout.addWidget(select_program_btn)
+        
+        # 创建快捷方式容器
+        shortcut_container = QWidget()
+        shortcut_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #dadce0;
+                border-radius: 4px;
+                min-height: 100px;
+            }
+        """)
+        
+        # 创建快捷方式网格布局
+        self.shortcut_grid = QGridLayout(shortcut_container)
+        self.shortcut_grid.setSpacing(10)  # 设置图标间距
+        self.shortcut_grid.setContentsMargins(10, 10, 10, 10)  # 设置边距
+        layout.addWidget(shortcut_container)
+        
+        # 设置接受拖放
+        shortcut_container.setAcceptDrops(True)
+        shortcut_container.dragEnterEvent = self.dragEnterEvent
+        shortcut_container.dropEvent = self.dropEvent
+        
+        # 存储快捷方式信息
+        self.shortcuts = []
+        
+    def select_program(self):
+        """选择程序文件"""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择程序",
+            "",
+            "程序文件 (*.exe);;快捷方式 (*.lnk);;所有文件 (*.*)"
+        )
+        
+        if file_path:
+            self.add_shortcut(file_path)
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """处理拖入事件"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dropEvent(self, event: QDropEvent):
+        """处理放下事件"""
+        urls = event.mimeData().urls()
+        for url in urls:
+            file_path = url.toLocalFile()
+            if file_path.endswith('.exe') or file_path.endswith('.lnk'):
+                self.add_shortcut(file_path)
+    def get_file_icon(self, file_path):
+        """获取文件的系统图标"""
+        try:
+            large = win32gui.SHGFI_ICON | win32gui.SHGFI_LARGEICON
+            small = win32gui.SHGFI_ICON | win32gui.SHGFI_SMALLICON
+            
+            # 获取大图标的句柄
+            _, icon_handle = win32gui.ExtractIconEx(file_path, 0)
+            if icon_handle:
+                # 创建DC
+                dc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+                memdc = dc.CreateCompatibleDC()
+                
+                # 创建位图
+                bitmap = win32ui.CreateBitmap()
+                bitmap.CreateCompatibleBitmap(dc, 32, 32)
+                memdc.SelectObject(bitmap)
+                
+                # 绘制图标
+                win32gui.DrawIconEx(memdc.GetHandleOutput(), 0, 0, 
+                                  icon_handle[0], 32, 32, 0, None, 
+                                  win32con.DI_NORMAL)
+                
+                # 转换为QIcon
+                bmpstr = bitmap.GetBitmapBits(True)
+                img = Image.frombuffer('RGBA', (32, 32), bmpstr, 'raw', 'BGRA', 0, 1)
+                
+                # 清理资源
+                win32gui.DestroyIcon(icon_handle[0])
+                bitmap.DeleteObject()
+                memdc.DeleteDC()
+                dc.DeleteDC()
+                
+                # 转换为QIcon
+                buffer = io.BytesIO()
+                img.save(buffer, format='PNG')
+                pixmap = QPixmap()
+                pixmap.loadFromData(buffer.getvalue())
+                return QIcon(pixmap)
+            
+        except Exception as e:
+            print(f"获取图标失败：{str(e)}")
+        return None
+    def add_shortcut(self, file_path):
+        """添加程序快捷方式"""
+        try:
+            if file_path.endswith('.lnk'):
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shortcut = shell.CreateShortCut(file_path)
+                target_path = shortcut.Targetpath
+                name = os.path.splitext(os.path.basename(file_path))[0]
+            else:
+                target_path = file_path
+                name = os.path.splitext(os.path.basename(file_path))[0]
+            
+            # 创建快捷方式按钮
+            btn = QPushButton()
+            
+            # 获取系统图标
+            icon = self.get_file_icon(file_path)
+            if icon:
+                btn.setIcon(icon)
+                btn.setIconSize(QSize(32, 32))
+            else:
+                btn.setText(name[:4])
+            
+            btn.setFixedSize(40, 40)
+            btn.setToolTip(name)
+            
+            from functools import partial
+            btn.clicked.connect(partial(self.launch_program, target_path))
+            
+            # 添加到网格布局
+            row = len(self.shortcuts) // 6
+            col = len(self.shortcuts) % 6
+            self.shortcut_grid.addWidget(btn, row, col)
+            
+            self.shortcuts.append({
+                'path': target_path,
+                'button': btn
+            })
+            
+            self.result_label.setText(f"已添加程序：{name}")
+            
+        except Exception as e:
+            self.result_label.setText(f"添加程序失败：{str(e)}")
+    def launch_program(self, path):
+        """启动程序"""
+        try:
+            os.startfile(path)
+            self.result_label.setText(f"已启动程序：{os.path.basename(path)}")
+        except Exception as e:
+            self.result_label.setText(f"无法启动程序：{str(e)}")
     def enterEvent(self, event):
         """鼠标进入窗口时显示"""
         if self.docked and not self.isVisible() and self.auto_hide_enabled:
